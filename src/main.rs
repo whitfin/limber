@@ -8,12 +8,15 @@
 //! Limber is only built as a command line tool, as it's simply a small
 //! CLI binding around the fairly low-level Elasticsearch library APIs.
 #![doc(html_root_url = "https://docs.rs/limber/1.0.0")]
-use clap::{App, AppSettings, Arg, ArgSettings, SubCommand};
+use clap::{App, AppSettings};
 use failure::Error;
 use tokio::runtime::current_thread::Runtime;
 
-mod cmd;
-use cmd::*;
+mod command;
+use command::*;
+
+mod macros;
+mod remote;
 
 fn main() -> Result<(), Error> {
     // We're mostly IO bound, so we just use a Runtime on the current
@@ -43,45 +46,8 @@ fn build_cli<'a, 'b>() -> App<'a, 'b> {
         .name(env!("CARGO_PKG_NAME"))
         .about(env!("CARGO_PKG_DESCRIPTION"))
         .version(env!("CARGO_PKG_VERSION"))
-        // export subcommand
-        .subcommand(
-            SubCommand::with_name("export")
-                .about("Export documents from an Elasticsearch cluster")
-                .args(&[
-                    // compression: -c, --compress
-                    Arg::with_name("compression")
-                        .help("Whether to compress documents using GZIP")
-                        .short("c")
-                        .long("compress")
-                        .takes_value(false)
-                        .set(ArgSettings::HideDefaultValue),
-                    // size: -q, --query [{}]
-                    Arg::with_name("query")
-                        .help("Query to use to filter exported documents")
-                        .short("q")
-                        .long("query")
-                        .takes_value(true)
-                        .set(ArgSettings::HideDefaultValue),
-                    // size: -s, --size [100]
-                    Arg::with_name("size")
-                        .help("Batch sizes to use")
-                        .short("s")
-                        .long("size")
-                        .takes_value(true)
-                        .set(ArgSettings::HideDefaultValue),
-                    // workers: -w [num_cpus::get()]
-                    Arg::with_name("workers")
-                        .help("Number of worker threads to use")
-                        .short("w")
-                        .long("workers")
-                        .takes_value(true)
-                        .set(ArgSettings::HideDefaultValue),
-                    // source: +required
-                    Arg::with_name("source")
-                        .help("Source to export documents from")
-                        .required(true),
-                ]),
-        )
+        // attach all commands
+        .subcommand(export::cmd())
         // settings required for parsing
         .settings(&[
             AppSettings::ArgRequiredElseHelp,

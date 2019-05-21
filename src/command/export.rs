@@ -6,18 +6,55 @@
 //!
 //! This interface also allows chaining into another instance of Limber, to
 //! enable piping from one cluster/index to another in a streaming fashion.
-use clap::{value_t, ArgMatches};
+use clap::{value_t, App, Arg, ArgMatches, ArgSettings, SubCommand};
 use elastic::client::requests::{ScrollRequest, SearchRequest};
-use elastic::client::AsyncClientBuilder;
 use elastic::prelude::*;
 use failure::{format_err, Error};
 use futures::future::{self, Either, Loop};
 use futures::prelude::*;
 use serde_json::{json, Value};
-use url::Url;
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
+
+use crate::remote;
+use crate::unpack;
+
+/// Returns the definition for this command in the CLI.
+///
+/// This function dictates options available to this command and what
+/// can be asserted to exist, as well as the other optional arguments.
+pub fn cmd<'a, 'b>() -> App<'a, 'b> {
+    SubCommand::with_name("export")
+        .about("Export documents from an Elasticsearch cluster")
+        .args(&[
+            // size: -q, --query [{}]
+            Arg::with_name("query")
+                .help("Query to use to filter exported documents")
+                .short("q")
+                .long("query")
+                .takes_value(true)
+                .set(ArgSettings::HideDefaultValue),
+            // size: -s, --size [100]
+            Arg::with_name("size")
+                .help("Batch sizes to use")
+                .short("s")
+                .long("size")
+                .takes_value(true)
+                .set(ArgSettings::HideDefaultValue),
+            // workers: -w [num_cpus::get()]
+            Arg::with_name("workers")
+                .help("Number of worker threads to use")
+                .short("w")
+                .long("workers")
+                .takes_value(true)
+                .set(ArgSettings::HideDefaultValue),
+            // source: +required
+            Arg::with_name("source")
+                .help("Source to export documents from")
+                .required(true),
+        ])
+}
 
 /// Constructs a `Future` to execute the `export` command.
 ///
@@ -25,27 +62,17 @@ use std::sync::Arc;
 /// process. The returned future will be a combination of several futures
 /// to represent the concurrency flags provided via the CLI arguments.
 pub fn run(args: &ArgMatches) -> Box<Future<Item = (), Error = Error>> {
+    // fetch the source from the arguments, should always be possible
+    let source = args.value_of("source").expect("guaranteed by CLI");
+
     // fetch the number of workers to use to export, default to CPU counts
     let workers = value_t!(args, "workers", usize).unwrap_or_else(|_| num_cpus::get());
 
     // parse arguments into a host/index pairing for later
-    let (host, index) = match parse_cluster_info(&args) {
-        Ok(info) => info,
-        Err(e) => {
-            let err = future::err(e);
-            return Box::new(err);
-        }
-    };
+    let (host, index) = unpack!(remote::parse_cluster(&source));
 
-    // construct a single client instance to be used across all tasks
-    let client = match AsyncClientBuilder::new().static_node(host).build() {
-        Ok(client) => Arc::new(client),
-        Err(e) => {
-            let fmt = format_err!("{}", e.to_string());
-            let err = future::err(fmt);
-            return Box::new(err);
-        }
-    };
+    // construct a single client instance for all tasks
+    let client = unpack!(remote::create_client(host));
 
     // create counter to track documents added
     let counter = Arc::new(AtomicUsize::new(0));
@@ -61,13 +88,8 @@ pub fn run(args: &ArgMatches) -> Box<Future<Item = (), Error = Error>> {
         let counter = counter.clone();
 
         // create our initial search request to trigger scrolling
-        let request = match construct_query(&args, idx, workers) {
-            Ok(query) => SearchRequest::for_index(index, query),
-            Err(e) => {
-                let err = future::err(e);
-                return Box::new(err);
-            }
-        };
+        let query = unpack!(construct_query(&args, idx, workers));
+        let request = SearchRequest::for_index(index, query);
 
         let execute = client
             .request(request)
@@ -148,44 +170,6 @@ pub fn run(args: &ArgMatches) -> Box<Future<Item = (), Error = Error>> {
             .map_err(|e| format_err!("{}", e.to_string()))
             .map(|_| ()),
     )
-}
-
-/// Attempts to parse a host/index pair out of the CLI arguments.
-///
-/// This logic is pretty vague; we don't actually test connection beyond
-/// looking to see if the provided scheme is HTTP(S). The index string
-/// returned will never be empty; if no index is provided, we'll use the
-/// ES "_all" alias to avoid having to deal with `Option` types for now.
-fn parse_cluster_info(args: &ArgMatches) -> Result<(String, String), Error> {
-    // fetch the source from the arguments, should always be possible
-    let source = args.value_of("source").expect("guaranteed by CLI");
-
-    // attempt to parse the resource
-    let mut url = Url::parse(source)?;
-
-    // this is invalid, so not entirely sure what to do here
-    if !url.has_host() || !url.scheme().starts_with("http") {
-        return Err(format_err!("Invalid cluster resource provided"));
-    }
-
-    // fetch index from path, trimming the prefix
-    let index = url.path().trim_start_matches('/');
-
-    // set default index
-    if index.is_empty() {
-        "_all"
-    } else {
-        index
-    };
-
-    // take ownership to enable mut url
-    let index = index.to_owned();
-
-    // trim the path
-    url.set_path("");
-
-    // assume we have a cluster now, so pass it back
-    Ok((url.as_str().trim_end_matches('/').to_owned(), index))
 }
 
 /// Constructs a query instance based on the worker count and identifier.
