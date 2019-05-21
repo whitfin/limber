@@ -1,0 +1,27 @@
+[package]
+name = "limber"
+version = "1.0.0" # remember to update html_root_url
+authors = ["Isaac Whitfield <iw@whitfin.io>"]
+description = "A simple (but quick) tool for backing up Elasticsearch documents."
+repository = "https://github.com/whitfin/limber"
+keywords = []
+categories = []
+readme = "README.md"
+edition = "2018"
+license = "MIT"
+
+[dependencies]
+clap = "2.33"
+elastic = "0.21.0-pre.4"
+elastic_derive = "0.21.0-pre.4"
+failure = "0.1"
+futures = "0.1"
+num_cpus = "1.10"
+serde_json = "1.0"
+tokio = "0.1"
+url = "1.7"
+
+[profile.release]
+codegen-units = 1
+opt-level = 3
+lto = true
