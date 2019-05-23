@@ -44,7 +44,7 @@ pub fn parse_cluster(target: &str) -> Result<(String, String), Error> {
     let index = url.path().trim_start_matches('/');
 
     // set default index
-    if index.is_empty() {
+    let index = if index.trim().is_empty() {
         "_all"
     } else {
         index
