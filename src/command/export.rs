@@ -14,10 +14,8 @@ use futures::future::{self, Either, Loop};
 use futures::prelude::*;
 use serde_json::{json, Value};
 
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::Arc;
-
 use crate::remote;
+use crate::stats::Counter;
 use crate::unpack;
 
 /// Returns the definition for this command in the CLI.
@@ -28,12 +26,21 @@ pub fn cmd<'a, 'b>() -> App<'a, 'b> {
     SubCommand::with_name("export")
         .about("Export documents from an Elasticsearch cluster")
         .args(&[
+            // concurrency: -c [1]
+            Arg::with_name("concurrency")
+                .help("Concurrency weighting to tune throughput")
+                .short("c")
+                .long("concurrency")
+                .takes_value(true)
+                .default_value("1")
+                .set(ArgSettings::HideDefaultValue),
             // size: -q, --query [{}]
             Arg::with_name("query")
                 .help("Query to use to filter exported documents")
                 .short("q")
                 .long("query")
                 .takes_value(true)
+                .default_value("{}")
                 .set(ArgSettings::HideDefaultValue),
             // size: -s, --size [100]
             Arg::with_name("size")
@@ -41,13 +48,7 @@ pub fn cmd<'a, 'b>() -> App<'a, 'b> {
                 .short("s")
                 .long("size")
                 .takes_value(true)
-                .set(ArgSettings::HideDefaultValue),
-            // workers: -w [num_cpus::get()]
-            Arg::with_name("workers")
-                .help("Number of worker threads to use")
-                .short("w")
-                .long("workers")
-                .takes_value(true)
+                .default_value("100")
                 .set(ArgSettings::HideDefaultValue),
             // source: +required
             Arg::with_name("source")
@@ -65,8 +66,8 @@ pub fn run(args: &ArgMatches) -> Box<Future<Item = (), Error = Error>> {
     // fetch the source from the arguments, should always be possible
     let source = args.value_of("source").expect("guaranteed by CLI");
 
-    // fetch the number of workers to use to export, default to CPU counts
-    let workers = value_t!(args, "workers", usize).unwrap_or_else(|_| num_cpus::get());
+    // fetch the concurrency factor to use for export, default to single worker
+    let concurrency = value_t!(args, "concurrency", usize).unwrap_or_else(|_| 1);
 
     // parse arguments into a host/index pairing for later
     let (host, index) = unpack!(remote::parse_cluster(&source));
@@ -74,21 +75,21 @@ pub fn run(args: &ArgMatches) -> Box<Future<Item = (), Error = Error>> {
     // construct a single client instance for all tasks
     let client = unpack!(remote::create_client(host));
 
-    // create counter to track documents added
-    let counter = Arc::new(AtomicUsize::new(0));
+    // create counter to track docs
+    let counter = Counter::shared(0);
 
     // create vec to store worker task futures
-    let mut tasks = Vec::with_capacity(workers);
+    let mut tasks = Vec::with_capacity(concurrency);
 
     // construct worker task
-    for idx in 0..workers {
+    for idx in 0..concurrency {
         // take ownership of stuff
         let index = index.clone();
         let client = client.clone();
         let counter = counter.clone();
 
         // create our initial search request to trigger scrolling
-        let query = unpack!(construct_query(&args, idx, workers));
+        let query = unpack!(construct_query(&args, idx, concurrency));
         let request = SearchRequest::for_index(index, query);
 
         let execute = client
@@ -114,7 +115,7 @@ pub fn run(args: &ArgMatches) -> Box<Future<Item = (), Error = Error>> {
                     }
 
                     // store hit length
-                    let len = hits.len();
+                    let length = hits.len();
 
                     // iterate docs
                     for hit in hits {
@@ -130,8 +131,10 @@ pub fn run(args: &ArgMatches) -> Box<Future<Item = (), Error = Error>> {
                     }
 
                     // increment the counter and print the state to stderr
-                    let cnt = counter.fetch_add(len, Ordering::Relaxed);
-                    eprintln!("Fetched batch of {}, have now processed {}", len, cnt + len);
+                    eprintln!(
+                        "Fetched another batch, have now processed {}",
+                        counter.increment(length)
+                    );
 
                     // fetch the new scroll_id
                     let scroll_id = value

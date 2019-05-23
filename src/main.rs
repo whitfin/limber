@@ -17,6 +17,7 @@ use command::*;
 
 mod macros;
 mod remote;
+mod stats;
 
 fn main() -> Result<(), Error> {
     // We're mostly IO bound, so we just use a Runtime on the current
