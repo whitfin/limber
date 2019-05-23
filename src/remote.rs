@@ -29,9 +29,9 @@ where
 ///
 /// This logic is pretty vague; we don't actually test connection beyond
 /// looking to see if the provided scheme is HTTP(S). The index string
-/// returned will never be empty; if no index is provided, we'll use the
-/// ES "_all" alias to avoid having to deal with `Option` types for now.
-pub fn parse_cluster(target: &str) -> Result<(String, String), Error> {
+/// returned will never be empty; if no index is provided, we'll use an
+/// empty `Option` type to allow the caller to decide how to handle it.
+pub fn parse_cluster(target: &str) -> Result<(String, Option<String>), Error> {
     // attempt to parse the resource
     let mut url = Url::parse(target)?;
 
@@ -45,13 +45,10 @@ pub fn parse_cluster(target: &str) -> Result<(String, String), Error> {
 
     // set default index
     let index = if index.trim().is_empty() {
-        "_all"
+        None
     } else {
-        index
+        Some(index.to_owned())
     };
-
-    // take ownership to enable mut url
-    let index = index.to_owned();
 
     // trim the path
     url.set_path("");

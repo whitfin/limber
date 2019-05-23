@@ -72,6 +72,12 @@ pub fn run(args: &ArgMatches) -> Box<Future<Item = (), Error = Error>> {
     // parse arguments into a host/index pairing for later
     let (host, index) = unpack!(remote::parse_cluster(&source));
 
+    // shim the index value
+    let index = match index {
+        Some(ref idx) => idx,
+        None => "_all",
+    };
+
     // construct a single client instance for all tasks
     let client = unpack!(remote::create_client(host));
 
@@ -84,9 +90,9 @@ pub fn run(args: &ArgMatches) -> Box<Future<Item = (), Error = Error>> {
     // construct worker task
     for idx in 0..concurrency {
         // take ownership of stuff
-        let index = index.clone();
-        let client = client.clone();
-        let counter = counter.clone();
+        let index = index.to_owned();
+        let client = client.to_owned();
+        let counter = counter.to_owned();
 
         // create our initial search request to trigger scrolling
         let query = unpack!(construct_query(&args, idx, concurrency));
