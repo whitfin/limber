@@ -95,6 +95,14 @@ example of importing the documents exported in the example further up:
 $ gzcat export.jsonl.gz | limber import http://localhost:9200
 ```
 
+You might notice that the API here allows you to pipe from one cluster or
+index directly into another. As an example:
+
+```shell
+$ limber export http://localhost:9200/my_first_index | \
+    limber import http://localhost:9200/my_second_index
+```
+
 The import command also allows for customization of concurrency factor and
 batch sizes. For all available options, please see `limber import -h`.
 
