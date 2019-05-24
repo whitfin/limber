@@ -31,6 +31,7 @@ fn main() -> Result<(), Error> {
     // for asynchronous execution for better throughput/performance.
     match build_cli().get_matches().subcommand() {
         ("export", Some(args)) => rt.block_on(export::run(args)),
+        ("import", Some(args)) => rt.block_on(import::run(args)),
         _ => build_cli().print_help().map_err(Into::into),
     }
 }
@@ -50,6 +51,7 @@ fn build_cli<'a, 'b>() -> App<'a, 'b> {
         .version(env!("CARGO_PKG_VERSION"))
         // attach all commands
         .subcommand(export::cmd())
+        .subcommand(import::cmd())
         // settings required for parsing
         .settings(&[
             AppSettings::ArgRequiredElseHelp,

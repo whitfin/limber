@@ -11,6 +11,7 @@ edition = "2018"
 license = "MIT"
 
 [dependencies]
+bytelines = "2.2"
 clap = "2.33"
 elastic = "0.21.0-pre.4"
 elastic_derive = "0.21.0-pre.4"
