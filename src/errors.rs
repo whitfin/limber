@@ -30,7 +30,7 @@ macro_rules! ft_err {
     ($ty:expr) => {
         match $ty {
             Err(e) => return Box::new(future::err(e)),
-            Ok(o) => o
+            Ok(o) => o,
         }
     };
 }
