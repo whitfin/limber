@@ -9,13 +9,14 @@
 //! CLI binding around the fairly low-level Elasticsearch library APIs.
 #![doc(html_root_url = "https://docs.rs/limber/1.0.0")]
 use clap::{App, AppSettings};
-use failure::Error;
 use tokio::runtime::current_thread::Runtime;
 
 mod command;
 use command::*;
 
-mod macros;
+mod errors;
+use errors::Error;
+
 mod remote;
 mod stats;
 

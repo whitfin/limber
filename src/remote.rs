@@ -5,10 +5,11 @@
 use elastic::client::sender::NodeAddress;
 use elastic::client::AsyncClientBuilder;
 use elastic::prelude::*;
-use failure::{format_err, Error};
 use url::Url;
 
 use std::sync::Arc;
+
+use crate::errors::{self, Error};
 
 /// Creates a new client based on the provided hostname.
 ///
@@ -22,7 +23,7 @@ where
         .static_node(host)
         .build()
         .map(Arc::new)
-        .map_err(|e| format_err!("{}", e.to_string()))
+        .map_err(errors::raw)
 }
 
 /// Attempts to parse a host/index pair out of the CLI arguments.
@@ -37,7 +38,7 @@ pub fn parse_cluster(target: &str) -> Result<(String, Option<String>), Error> {
 
     // this is invalid, so not entirely sure what to do here
     if !url.has_host() || !url.scheme().starts_with("http") {
-        return Err(format_err!("Invalid cluster resource provided"));
+        return Err(errors::raw("Invalid cluster resource provided"));
     }
 
     // fetch index from path, trimming the prefix

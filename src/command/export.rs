@@ -9,14 +9,14 @@
 use clap::{value_t, App, Arg, ArgMatches, ArgSettings, SubCommand};
 use elastic::client::requests::{ScrollRequest, SearchRequest};
 use elastic::prelude::*;
-use failure::{format_err, Error};
 use futures::future::{self, Either, Loop};
 use futures::prelude::*;
 use serde_json::{json, Value};
 
+use crate::errors::{self, Error};
+use crate::ft_err;
 use crate::remote;
 use crate::stats::Counter;
-use crate::unpack;
 
 /// Returns the definition for this command in the CLI.
 ///
@@ -70,7 +70,7 @@ pub fn run(args: &ArgMatches) -> Box<Future<Item = (), Error = Error>> {
     let concurrency = value_t!(args, "concurrency", usize).unwrap_or_else(|_| 1);
 
     // parse arguments into a host/index pairing for later
-    let (host, index) = unpack!(remote::parse_cluster(&source));
+    let (host, index) = ft_err!(remote::parse_cluster(&source));
 
     // shim the index value
     let index = match index {
@@ -79,7 +79,7 @@ pub fn run(args: &ArgMatches) -> Box<Future<Item = (), Error = Error>> {
     };
 
     // construct a single client instance for all tasks
-    let client = unpack!(remote::create_client(host));
+    let client = ft_err!(remote::create_client(host));
 
     // create counter to track docs
     let counter = Counter::shared(0);
@@ -95,7 +95,7 @@ pub fn run(args: &ArgMatches) -> Box<Future<Item = (), Error = Error>> {
         let counter = counter.to_owned();
 
         // create our initial search request to trigger scrolling
-        let query = unpack!(construct_query(&args, idx, concurrency));
+        let query = ft_err!(construct_query(&args, idx, concurrency));
         let request = SearchRequest::for_index(index, query);
 
         let execute = client
@@ -173,12 +173,8 @@ pub fn run(args: &ArgMatches) -> Box<Future<Item = (), Error = Error>> {
         tasks.push(execute);
     }
 
-    // join all tasks
-    Box::new(
-        future::join_all(tasks)
-            .map_err(|e| format_err!("{}", e.to_string()))
-            .map(|_| ()),
-    )
+    // join all tasks, ignoring the actual output and coercing errors
+    Box::new(future::join_all(tasks).map_err(errors::raw).map(|_| ()))
 }
 
 /// Constructs a query instance based on the worker count and identifier.
