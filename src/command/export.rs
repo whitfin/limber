@@ -28,7 +28,7 @@ pub fn cmd<'a, 'b>() -> App<'a, 'b> {
         .args(&[
             // concurrency: -c [1]
             Arg::with_name("concurrency")
-                .help("Concurrency weighting to tune throughput")
+                .help("A concurrency weighting to tune throughput")
                 .short("c")
                 .long("concurrency")
                 .takes_value(true)
@@ -36,7 +36,7 @@ pub fn cmd<'a, 'b>() -> App<'a, 'b> {
                 .set(ArgSettings::HideDefaultValue),
             // size: -q, --query [{}]
             Arg::with_name("query")
-                .help("Query to use to filter exported documents")
+                .help("A query to use to filter exported documents")
                 .short("q")
                 .long("query")
                 .takes_value(true)
@@ -44,7 +44,7 @@ pub fn cmd<'a, 'b>() -> App<'a, 'b> {
                 .set(ArgSettings::HideDefaultValue),
             // size: -s, --size [100]
             Arg::with_name("size")
-                .help("Batch sizes to use")
+                .help("The amount of documents to pull per request")
                 .short("s")
                 .long("size")
                 .takes_value(true)
@@ -52,7 +52,7 @@ pub fn cmd<'a, 'b>() -> App<'a, 'b> {
                 .set(ArgSettings::HideDefaultValue),
             // source: +required
             Arg::with_name("source")
-                .help("Source to export documents from")
+                .help("Source host to export documents from")
                 .required(true),
         ])
 }

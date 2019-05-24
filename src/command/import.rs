@@ -31,7 +31,7 @@ pub fn cmd<'a, 'b>() -> App<'a, 'b> {
         .args(&[
             // concurrency: -c [1]
             Arg::with_name("concurrency")
-                .help("Concurrency weighting to tune throughput")
+                .help("A concurrency weighting to tune throughput")
                 .short("c")
                 .long("concurrency")
                 .takes_value(true)
@@ -39,7 +39,7 @@ pub fn cmd<'a, 'b>() -> App<'a, 'b> {
                 .set(ArgSettings::HideDefaultValue),
             // size: -s, --size [100]
             Arg::with_name("size")
-                .help("Batch sizes to use")
+                .help("The amount of documents to index per request")
                 .short("s")
                 .long("size")
                 .takes_value(true)
@@ -47,7 +47,7 @@ pub fn cmd<'a, 'b>() -> App<'a, 'b> {
                 .set(ArgSettings::HideDefaultValue),
             // target: +required
             Arg::with_name("target")
-                .help("Target to import documents to")
+                .help("Target host to import documents to")
                 .required(true),
         ])
 }
