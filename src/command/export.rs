@@ -7,8 +7,8 @@
 //! This interface also allows chaining into another instance of Limber, to
 //! enable piping from one cluster/index to another in a streaming fashion.
 use clap::{value_t, App, Arg, ArgMatches, ArgSettings, SubCommand};
-use elastic::client::requests::{ScrollRequest, SearchRequest};
-use elastic::prelude::*;
+use elastic::endpoints::{ScrollRequest, SearchRequest};
+use elastic::http::receiver::AsyncResponseBuilder;
 use futures::future::{self, Either, Loop};
 use futures::prelude::*;
 use serde_json::{json, Value};
