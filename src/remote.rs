@@ -2,8 +2,8 @@
 //!
 //! This module offers functions for interacting with a remote cluster,
 //! such as hostname parsing, client creation, etc.
-use elastic::http::sender::NodeAddress;
 use elastic::client::AsyncClientBuilder;
+use elastic::http::sender::NodeAddress;
 use elastic::prelude::*;
 use url::Url;
 
