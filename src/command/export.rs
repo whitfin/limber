@@ -62,7 +62,7 @@ pub fn cmd<'a, 'b>() -> App<'a, 'b> {
 /// This future should be spawned on a Runtime to carry out the exporting
 /// process. The returned future will be a combination of several futures
 /// to represent the concurrency flags provided via the CLI arguments.
-pub fn run(args: &ArgMatches) -> Box<Future<Item = (), Error = Error>> {
+pub fn run(args: &ArgMatches) -> Box<dyn Future<Item = (), Error = Error>> {
     // fetch the source from the arguments, should always be possible
     let source = args.value_of("source").expect("guaranteed by CLI");
 
@@ -72,11 +72,8 @@ pub fn run(args: &ArgMatches) -> Box<Future<Item = (), Error = Error>> {
     // parse arguments into a host/index pairing for later
     let (host, index) = ft_err!(remote::parse_cluster(&source));
 
-    // shim the index value
-    let index = match index {
-        Some(ref idx) => idx,
-        None => "_all",
-    };
+    // shim the index value when needed by defaulting to all
+    let index = index.unwrap_or_else(|| "_all".to_string());
 
     // construct a single client instance for all tasks
     let client = ft_err!(remote::create_client(host));

@@ -55,7 +55,7 @@ pub fn cmd<'a, 'b>() -> App<'a, 'b> {
 /// Constructs a `Future` to execute the `import` command.
 ///
 /// This future should be spawned on a Runtime to carry out the importing process.
-pub fn run(args: &ArgMatches) -> Box<Future<Item = (), Error = Error>> {
+pub fn run(args: &ArgMatches) -> Box<dyn Future<Item = (), Error = Error>> {
     // fetch the configured batch size, or default to 100
     let size = value_t!(args, "size", usize).unwrap_or(100);
 
