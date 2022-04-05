@@ -7,7 +7,7 @@
 //!
 //! Limber is only built as a command line tool, as it's simply a small
 //! CLI binding around the fairly low-level Elasticsearch library APIs.
-#![doc(html_root_url = "https://docs.rs/limber/1.0.2")]
+#![doc(html_root_url = "https://docs.rs/limber/1.1.0")]
 use anyhow::Result;
 use clap::Command;
 

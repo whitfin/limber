@@ -1,6 +1,6 @@
 [package]
 name = "limber"
-version = "1.0.2" # remember to update html_root_url
+version = "1.1.0" # remember to update html_root_url
 authors = ["Isaac Whitfield <iw@whitfin.io>"]
 description = "A simple (but quick) tool for backing up Elasticsearch documents."
 repository = "https://github.com/whitfin/limber"
