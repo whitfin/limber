@@ -8,30 +8,20 @@
 //! Limber is only built as a command line tool, as it's simply a small
 //! CLI binding around the fairly low-level Elasticsearch library APIs.
 #![doc(html_root_url = "https://docs.rs/limber/1.0.2")]
-use clap::{App, AppSettings};
-use tokio::runtime::current_thread::Runtime;
+use anyhow::Result;
+use clap::Command;
 
 mod command;
 use command::*;
 
-mod errors;
-use errors::Error;
-
 mod remote;
 mod stats;
 
-fn main() -> Result<(), Error> {
-    // We're mostly IO bound, so we just use a Runtime on the current
-    // thread. This lets us be a little more flexible in our Futures
-    // as they don't have to implement `Send`, which isn't always easy.
-    let mut rt = Runtime::new().unwrap();
-
-    // Delegate to the subcommand, or print the help menu and exit. Each
-    // subcommand can be spawned and blocked on via the Runtime to allow
-    // for asynchronous execution for better throughput/performance.
+#[tokio::main]
+async fn main() -> Result<()> {
     match build_cli().get_matches().subcommand() {
-        ("export", Some(args)) => rt.block_on(export::run(args)),
-        ("import", Some(args)) => rt.block_on(import::run(args)),
+        Some(("export", args)) => export::run(args).await,
+        Some(("import", args)) => import::run(args).await,
         _ => build_cli().print_help().map_err(Into::into),
     }
 }
@@ -43,8 +33,8 @@ fn main() -> Result<(), Error> {
 ///
 /// In terms of visibility, this method is defined on the struct due to
 /// the parser being specifically designed around the `Options` struct.
-fn build_cli<'a, 'b>() -> App<'a, 'b> {
-    App::new("")
+fn build_cli<'a>() -> Command<'a> {
+    Command::new("")
         // package metadata from cargo
         .name(env!("CARGO_PKG_NAME"))
         .about(env!("CARGO_PKG_DESCRIPTION"))
@@ -53,8 +43,6 @@ fn build_cli<'a, 'b>() -> App<'a, 'b> {
         .subcommand(export::cmd())
         .subcommand(import::cmd())
         // settings required for parsing
-        .settings(&[
-            AppSettings::ArgRequiredElseHelp,
-            AppSettings::HidePossibleValuesInHelp,
-        ])
+        .arg_required_else_help(true)
+        .hide_possible_values(true)
 }

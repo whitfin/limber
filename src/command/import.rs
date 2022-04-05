@@ -6,18 +6,17 @@
 //!
 //! This interface also allows chaining from another instance of Limber, to
 //! enable piping from one cluster/index to another in a streaming fashion.
+use anyhow::Result;
 use bytelines::*;
-use clap::{value_t, App, Arg, ArgMatches, ArgSettings, SubCommand};
-use elastic::client::requests::bulk::*;
-use futures::future::{self, Either, Loop};
-use futures::prelude::*;
-use futures::sync::mpsc;
+use clap::{Arg, ArgMatches, Command};
+use elasticsearch::indices::IndicesRefreshParts;
+use elasticsearch::{BulkOperation, BulkParts};
+use futures::stream::StreamExt;
 use serde_json::Value;
+use tokio::io::{self, BufReader};
 
-use std::io::{self, BufReader};
+use std::sync::Arc;
 
-use crate::errors::{self, Error};
-use crate::ft_err;
 use crate::remote;
 use crate::stats::Counter;
 
@@ -25,28 +24,28 @@ use crate::stats::Counter;
 ///
 /// This function dictates options available to this command and what
 /// can be asserted to exist, as well as the other optional arguments.
-pub fn cmd<'a, 'b>() -> App<'a, 'b> {
-    SubCommand::with_name("import")
+pub fn cmd<'a>() -> Command<'a> {
+    Command::new("import")
         .about("Import documents to an Elasticsearch cluster")
         .args(&[
-            // concurrency: -c [1]
-            Arg::with_name("concurrency")
+            // concurrency: c [1]
+            Arg::new("concurrency")
                 .help("A concurrency weighting to tune throughput")
-                .short("c")
+                .short('c')
                 .long("concurrency")
                 .takes_value(true)
                 .default_value("1")
-                .set(ArgSettings::HideDefaultValue),
-            // size: -s, --size [100]
-            Arg::with_name("size")
+                .hide_default_value(true),
+            // size: s, size [100]
+            Arg::new("size")
                 .help("The amount of documents to index per request")
-                .short("s")
+                .short('s')
                 .long("size")
                 .takes_value(true)
                 .default_value("100")
-                .set(ArgSettings::HideDefaultValue),
+                .hide_default_value(true),
             // target: +required
-            Arg::with_name("target")
+            Arg::new("target")
                 .help("Target host to import documents to")
                 .required(true),
         ])
@@ -55,122 +54,104 @@ pub fn cmd<'a, 'b>() -> App<'a, 'b> {
 /// Constructs a `Future` to execute the `import` command.
 ///
 /// This future should be spawned on a Runtime to carry out the importing process.
-pub fn run(args: &ArgMatches) -> Box<dyn Future<Item = (), Error = Error>> {
+pub async fn run(args: &ArgMatches) -> Result<()> {
     // fetch the configured batch size, or default to 100
-    let size = value_t!(args, "size", usize).unwrap_or(100);
+    let size = args.value_of_t::<usize>("size").unwrap_or(100);
 
     // fetch the target from the arguments, should always be possible
     let target = args.value_of("target").expect("guaranteed by CLI");
 
-    // fetch the configured concurrency factor to use when importing events
-    let concurrency = value_t!(args, "concurrency", usize).unwrap_or_else(|_| 1);
+    // fetch the concurrency factor to use for export, default to single worker
+    let concurrency = args.value_of_t::<usize>("concurrency").unwrap_or(1);
 
     // parse arguments into a host/index pairing for later
-    let (host, index) = ft_err!(remote::parse_cluster(target));
-
-    // construct a single client instance for all tasks
-    let client = ft_err!(remote::create_client(host));
-
-    // construct a channel with bounded concurrency
-    let (tx, rx) = mpsc::channel(size * concurrency);
-
-    // Spawn a new thread to forward stdin through to our worker
-    //
-    // This is necessary because Tokio's FS support requires a multithreaded
-    // Runtime due to `stdin` streaming being blocking. We can't (yet) use a
-    // Runtime off of the current thread due to limitations in the Elastic
-    // library - so we just use synchronous IO on another thread and pass on.
-    std::thread::spawn(move || {
-        // fetch stdin as lines
-        let stdin = io::stdin();
-        let stdin = stdin.lock();
-        let stdin = BufReader::new(stdin);
-        let stdin = stdin.byte_lines().into_iter();
-
-        // create a future to iterate all lines of stdin and pass them to the channel
-        let lines = future::loop_fn((tx, stdin), |(tx, mut lines)| match lines.next() {
-            Some(line) => {
-                let forward = tx
-                    .send(line.unwrap())
-                    .and_then(|tx| Ok(Loop::Continue((tx, lines))));
-                Either::B(forward)
-            }
-            None => {
-                let ctx = (tx, lines);
-                let brk = Loop::Break(ctx);
-                let okr = future::ok(brk);
-                Either::A(okr)
-            }
-        });
-
-        // block on the loop, shouldn't really error?
-        lines.wait().expect("unable to forward stdin");
-    });
+    let (host, index) = remote::parse_cluster(target)?;
+    let client = Arc::new(remote::create_client(&host)?);
 
     // create a counter to track docs
     let counter = Counter::shared(0);
 
-    // iterate all lines
-    let worker = rx
-        // parse all line input
-        .filter_map(move |line| {
-            // parsed the bytes into a `Value` so we can fetch JSON data back from it
-            let mut parsed = serde_json::from_slice::<Value>(&line).ok()?;
+    // fetch stdin as lines
+    let stdin = BufReader::new(io::stdin());
+    let lines = AsyncByteLines::new(stdin);
 
-            // shim the index to the doc index
-            let index = match index {
-                Some(ref index) => index.to_owned(),
-                None => parsed.get("_index")?.as_str()?.to_owned(),
-            };
+    // start streaming the lines and map into bulk operations
+    let filter = lines.into_stream().filter_map(|input| async {
+        // parsed the bytes into a `Value` so we can fetch JSON data back from it
+        let mut parsed = serde_json::from_slice::<Value>(&input.ok()?).ok()?;
 
-            // fetch the values of the document _id and _type
-            let id = parsed.get("_id")?.as_str()?.to_owned();
-            let ty = parsed.get("_type")?.as_str()?.to_owned();
+        // shim the index to the doc index
+        let index = match index {
+            Some(ref index) => index.to_owned(),
+            None => parsed.get("_index")?.as_str()?.to_owned(),
+        };
 
-            // create a request
-            let req = bulk_raw()
-                .index(parsed["_source"].take())
+        Some(
+            // create our bulk request using the source
+            BulkOperation::index(parsed["_source"].take())
+                .id(parsed.get("_id")?.as_str()?.to_owned())
                 .index(index)
-                .id(id)
-                .ty(ty);
+                .into(),
+        )
+    });
 
-            // pass back
-            Some(req)
-        })
-        .chunks(size)
-        .map_err(|_| unreachable!())
-        .for_each(move |operations| {
-            let counter = counter.clone();
+    // chunk the stream into batches
+    let chunk = filter.chunks(size);
 
-            client
-                .bulk()
-                .extend(operations)
+    // handle each batch concurrently and send each buffer to Elasticsearch directly
+    let worker = chunk.for_each_concurrent(concurrency, |batch: Vec<BulkOperation<_>>| {
+        async {
+            // grab counter for later
+            let total = batch.len();
+
+            // index the batch
+            let response = client
+                .bulk(BulkParts::None)
+                .body(batch)
                 .send()
-                .map_err(errors::raw)
-                .and_then(move |response| {
-                    // increment the counter and print the state to stderr
-                    eprintln!(
-                        "Indexed another batch, have now processed {}",
-                        counter.increment(size)
-                    );
+                .await
+                .expect("unable to import batch")
+                .error_for_status_code()
+                .expect("unable to import batch");
 
-                    // skip if we're done
-                    if response.is_ok() {
-                        return Ok(());
-                    }
+            // increment the counter and print the state to stderr
+            eprintln!(
+                "Indexed another batch, have now processed {}",
+                counter.increment(total)
+            );
 
-                    // log errors if any happened
-                    for item in response.iter() {
-                        if item.is_err() {
-                            eprintln!("err: {:?}", item);
-                        }
-                    }
+            // turn the body back into an array of items to work with
+            let body = response.json::<Value>().await.unwrap();
 
-                    // kill the future to bail out early (for now)
-                    Err(errors::raw("Received errors in bulk import"))
-                })
-        });
+            // skip out if none of the requests returned an error
+            if !body.get("errors").unwrap().as_bool().unwrap_or(false) {
+                return;
+            }
 
-    // ignore the actual output and coerce errors
-    Box::new(worker.map_err(errors::raw).map(|_| ()))
+            // iterate through all items which came back in the response
+            for item in body.get("items").unwrap().as_array().unwrap() {
+                // fetch the failed shard counter to check errors
+                let failed = item.pointer("/index/_shards/failed");
+
+                // log errors if any happened (based on shards)
+                if failed.unwrap().as_u64().unwrap_or(1) > 0 {
+                    eprintln!("err: {:?}", item);
+                }
+            }
+        }
+    });
+
+    // await all!
+    worker.await;
+
+    // execute a refresh against the cluster
+    client
+        .indices()
+        .refresh(IndicesRefreshParts::Index(&["_all"]))
+        .send()
+        .await?
+        .error_for_status_code()?;
+
+    // done!
+    Ok(())
 }
