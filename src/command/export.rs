@@ -167,7 +167,7 @@ async fn scroll(client: Arc<Elasticsearch>, counter: Arc<Counter>, index: String
         );
 
         // fetch the new scroll_id
-        let scroll_id = value
+        let scroll_id = body
             .get("_scroll_id")
             .expect("unable to locate scroll_id")
             .as_str()
